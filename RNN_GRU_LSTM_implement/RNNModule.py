@@ -1,56 +1,50 @@
 import torch
 import torch.nn as nn
-from rnncell import RNNCell
+from RNNCell import RNNCell
 
 class SimpleRNN(nn.Module):
-    def __init__(self, input_size, hidden_size, num_layers, bias=True, output_size=1, activation='tanh'):
+    def __init__(self, input_size, hidden_size, output_size, num_layers=1, bias=True, activation='tanh'):
         super(SimpleRNN, self).__init__()
         self.input_size = input_size
         self.hidden_size = hidden_size
+        self.output_size = output_size
         self.num_layers = num_layers
         self.bias = bias
-        self.output_size = output_size
-        self.activation = activation
 
-        self.rnn_cell_list = nn.ModuleList()
+        self.rnn_cells = nn.ModuleList()
 
         if activation == 'tanh':
-            self.rnn_cell_list.append(RNNCell(self.input_size, self.hidden_size, self.bias, 'tanh'))
+            self.rnn_cells.append(RNNCell(self.input_size, self.hidden_size, self.bias, 'tanh'))
             for _ in range(1, self.num_layers):
-                self.rnn_cell_list.append(RNNCell(self.input_size, self.hidden_size, self.bias, 'tanh'))
+                self.rnn_cells.append(RNNCell(self.hidden_size, self.hidden_size, self.bias, 'tanh'))
         
         elif activation == 'relu':
-            self.rnn_cell_list.append(RNNCell(self.input_size, self.output_size, self.bias, 'relu'))
+            self.rnn_cells.append(RNNCell(self.input_size, self.hidden_size, self.bias, 'relu'))
             for _ in range(1, self.num_layers):
-                self.rnn_cell_list.append(RNNCell(self.input_size, self.output_size, self.bias, 'relu'))
+                self.rnn_cells.append(RNNCell(self.hidden_size, self.hidden_size, self.bias, 'relu'))
         
         else:
             raise ValueError("Activation choosen different. Choose from 'tanh' or 'relu'")
         
         self.fc = nn.Linear(self.hidden_size, self.output_size)
     
-    def forward(self, input, hx=None):
-        batch_size = input.size(0)
-        seq_len = input.size(1)
+    def forward(self, x, h0=None):
+        batch_size = x.size(0)
+        seq_len = x.size(1)
 
-        if hx is None:
-            h0 = torch.zeros(self.num_layers, batch_size, self.hidden_size, device=input.device)
+        if h0 is None:
+            h = torch.zeros(self.num_layers, batch_size, self.hidden_size, device=x.device)
         else:
-            h0 = hx
+            h = h0
         
-        outs = []
-        hidden = list(h0.unbind(0))
-
+        outputs = []
         for t in range(seq_len):
+            input_t = x[:, t, :]
             for layer in range(self.num_layers):
-                if layer == 0:
-                    hidden_l = self.rnn_cell_list[layer](input[:,t,:], hidden[layer])
-                else:
-                    hidden_l = self.rnn_cell_list[layer](hidden[layer-1], hidden[layer])
-                
-                hidden[layer] = hidden_l
-            outs.append(hidden_l)
-        out = outs[-1].squeeze()
-        out = self.fc(out)
+                h[layer] = self.rnn_cells[layer](input_t, h[layer])
+                input_t = h[layer]
+            outputs.append(h[-1])
+        outputs = torch.stack(outputs, dim=1)
+        out = self.fc(outputs[:,-1,:])
 
-        return out
+        return outputs, h
